@@ -17,7 +17,7 @@ class Instance:
     """
     Represents an instance of the fair course-allocation problem.
     Exposes the following functions:
-     * agent_capacity:       maps an agent name/index to its capacity or weight(num of seats required/num of credit points).
+     * agent_capacity:       maps an agent name/index to its capacity (num of required seats/credit points).
      * item_capacity:        maps an item  name/index to its capacity(num of seats allocated).
      * item_weight:          maps an item  name/index to its weight(num of credit points).
      * agent_conflicts:      maps an agent name/index to a set of items that conflict with it (- cannot be allocated to this agent).
