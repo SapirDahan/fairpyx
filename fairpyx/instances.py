@@ -58,7 +58,7 @@ class Instance:
     >>> instance.agent_ranking("Alice", ["c2"])
     {'c2': 1, 'c1': 2}
 
-    ## dict of dicts, with weights:
+    ### dict of dicts, with weights:
     >>> instance = Instance(
     ...   agent_capacities = {"Alice": 2, "Bob": 2},
     ...   item_capacities  = {"c1": 2, "c2": 1},
@@ -89,6 +89,35 @@ class Instance:
     {'c1': 1, 'c2': 2}
     >>> instance.agent_ranking("Alice", ["c2"])
     {'c1': 1, 'c2': 2}
+
+    ### dict of dicts, with weights but no agent capacities:
+    >>> instance = Instance(
+    ...   agent_target_weights = {"Alice": 10, "Bob": 15},
+    ...   item_weights     = {"c1": 4, "c2": 6, "c3": 5},
+    ...   item_capacities  = {"c1": 2, "c2": 2, "c3": 2},
+    ...   valuations       = {"Alice": {"c1": 50, "c2": 70, "c3": 60}, "Bob": {"c1": 40, "c2": 80, "c3": 90}})
+    >>> list(instance.agents)
+    ['Alice', 'Bob']
+    >>> list(instance.items)
+    ['c1', 'c2', 'c3']
+    >>> instance.agent_target_weight("Alice")
+    10
+    >>> instance.agent_target_weight("Bob")
+    15
+    >>> instance.item_weight("c1")
+    4
+    >>> instance.item_weight("c2")
+    6
+    >>> instance.item_weight("c3")
+    5
+    >>> instance.agent_item_value("Alice", "c2")
+    70
+    >>> instance.agent_item_value("Bob", "c3")
+    90
+    >>> instance.agent_maximum_value("Alice")
+    130
+    >>> instance.agent_maximum_value("Bob")
+    210
 
     ### dict of lists:
     >>> instance = Instance(
