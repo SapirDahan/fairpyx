@@ -80,6 +80,8 @@ def test_weights():
     string_explanation_logger = StringsExplanationLogger(agents=[name for name in instance.agents], language='he')
     allocation = fairpyx.divide(fairpyx.algorithms.iterated_maximum_matching_adjusted, instance=instance, explanation_logger = string_explanation_logger)
     fairpyx.validate_allocation(instance, allocation, title=f"adjusted")
+    with open('explanation.txt','w') as f:
+        print(string_explanation_logger.map_agent_to_explanation()['ron'],file=f)
 
 
 if __name__ == "__main__":

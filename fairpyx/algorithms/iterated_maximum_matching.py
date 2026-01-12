@@ -92,8 +92,13 @@ def iterated_maximum_matching(alloc:AllocationBuilder, adjust_utilities:bool=Fal
             "en": "The maximum possible value you could get in this iteration is %g. You get course %s whose value for you is %g.",
         },
         "you_have_your_capacity": {
-            "he": "קיבלת את כל %d הקורסים שהיית צריך.",
-            "en": "You now have all %d courses that you needed.",
+            "he": "ביקשת %d קורסים, וקיבלת את כל %d הקורסים שביקשת.",
+            "en": "You requested %d courses, and you received all %d of them."
+
+        },
+        "you_have_your_weight": {
+            "he": "היו לך %d נקודות זכות לסיום התואר, וקיבלת קורסים במשקל כולל של %d נקודות זכות.",
+            "en": "You had %d credit points left toward graduation, and you received courses totaling %d credit points."
         },
         "as_compensation": {
             "he": "כפיצוי, הוספנו את ההפרש %g לקורס הכי טוב שנשאר לך, %s.",
@@ -148,7 +153,10 @@ def iterated_maximum_matching(alloc:AllocationBuilder, adjust_utilities:bool=Fal
                 for agent,item in map_agent_to_item.items():
                     explanation_logger.info(_("your_course_this_iteration"), map_agent_to_max_possible_value[agent], item, map_agent_to_value[agent], agents=agent)
                     if len(alloc.bundles[agent])==alloc.instance.agent_capacity(agent):
-                        explanation_logger.info("\n"+_("you_have_your_capacity"), alloc.instance.agent_capacity(agent), agents=agent)
+                        explanation_logger.info("\n"+_("you_have_your_capacity"), alloc.instance.agent_capacity(agent), len(alloc.bundles[agent]), agents=agent)
+                    elif sum(alloc.instance.item_weight(item) for item in alloc.bundles[agent]) >= alloc.instance.agent_target_weight(agent):
+                        bundle_weight = sum(alloc.instance.item_weight(item) for item in alloc.bundles[agent])
+                        explanation_logger.info("\n"+_("you_have_your_weight"), alloc.instance.agent_target_weight(agent), bundle_weight, agents=agent)
                     else:
                         next_best_item = max(alloc.remaining_items(), key=lambda item:agent_item_value_with_bonus(agent,item))
                         current_value_of_next_best_item = agent_item_value_with_bonus(agent,next_best_item)
