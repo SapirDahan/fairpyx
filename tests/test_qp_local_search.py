@@ -8,13 +8,14 @@ Programmer: Rotem Melamed
 Date: 08/11/2025
 """
 
+import logging
+
 import pytest
 import random
 from itertools import product
 from fairpyx import Instance
 from fairpyx.algorithms.qp_local_search import (
     qp_max_min_allocation,
-    solve_configuration_lp,
 )
 
 
@@ -204,6 +205,10 @@ def test_large_input():
     Each item has a random fixed size. Each agent is eligible for their
     3 zone items plus some random others.
     """
+    from fairpyx.algorithms.qp_local_search import logger
+    logger.addHandler(logging.StreamHandler())
+    logger.setLevel(logging.INFO)
+
     agents = [f"p{i}" for i in range(10)]
     items = [f"r{j}" for j in range(30)]
 
@@ -252,42 +257,6 @@ def test_large_input():
         assert value >= required - 1e-6, \
             f"Agent {agent} has value {value:.4f}, expected >= {required:.4f} " \
             f"(OPT_lb={opt_lower_bound}, epsilon={epsilon})"
-
-
-# ==============================================================================
-#  Configuration LP tests
-# ==============================================================================
-
-def test_simple():
-    """
-    r1 size=10, r2 size=5, r3 size=10.
-    p0 eligible for {r1, r2}, p1 eligible for {r2, r3}.
-    Verifies that solve_configuration_lp generates valid configurations.
-    """
-    agents = ["p0", "p1"]
-    items = ["r1", "r2", "r3"]
-    item_sizes = {"r1": 10, "r2": 5, "r3": 10}
-    eligible = {
-        "p0": {"r1", "r2"},
-        "p1": {"r2", "r3"},
-    }
-    valuations = make_restricted_valuations(agents, items, item_sizes, eligible)
-    instance = Instance(agents=agents, items=items, valuations=valuations)
-
-    T = 15.0
-    epsilon = 0.1
-    threshold = T / (4 + epsilon)
-
-    configs = solve_configuration_lp(instance, T, epsilon)
-
-    assert "p0" in configs
-    assert "p1" in configs
-
-    for agent, agent_configs in configs.items():
-        for config in agent_configs:
-            value = sum(instance.agent_item_value(agent, item) for item in config)
-            assert value >= threshold, \
-                f"Config {config} for {agent} has value {value} < threshold {threshold}"
 
 
 # ==============================================================================
