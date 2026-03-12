@@ -405,6 +405,10 @@ def safe_swap(alloc: AllocationBuilder, player_losing: Any, items_losing, player
             alloc.bundles[player_losing].remove(item)
         if hasattr(alloc, 'remaining_item_capacities'):
             alloc.remaining_item_capacities[item] = alloc.remaining_item_capacities.get(item, 0) + 1
+        if hasattr(alloc, 'remaining_conflicts'):
+            alloc.remaining_conflicts.discard((player_losing, item))
+            for conflicting_item in alloc.instance.item_conflicts(item):
+                alloc.remaining_conflicts.discard((player_losing, conflicting_item))
 
     for item in items_getting:
         alloc.give(player_getting, item)
