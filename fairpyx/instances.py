@@ -8,6 +8,7 @@ Since: 2023-07
 from numbers import Number
 import numpy as np
 from functools import cache
+from collections import defaultdict
 
 import logging
 logger = logging.getLogger(__name__)
@@ -17,7 +18,8 @@ class Instance:
     """
     Represents an instance of the fair course-allocation problem.
     Exposes the following functions:
-     * agent_capacity:       maps an agent name/index to its capacity or weight(num of seats required/num of credit points).
+     * agent_capacity:       maps an agent name/index to its capacity(num of seats required).
+     * agent_target_weights: maps an agent name/index to its weight(num of credit points).
      * item_capacity:        maps an item  name/index to its capacity(num of seats allocated).
      * item_weight:          maps an item  name/index to its weight(num of credit points).
      * agent_conflicts:      maps an agent name/index to a set of items that conflict with it (- cannot be allocated to this agent).
@@ -29,8 +31,7 @@ class Instance:
     ### dict of dicts:
     >>> instance = Instance(
     ...   agent_capacities = {"Alice": 2, "Bob": 3}, 
-    ...   item_capacities  = {"c1": 4.5, "c2": 5}, 
-    ...   item_weights     = {"c1": 4, "c2": 2}, 
+    ...   item_capacities  = {"c1": 4, "c2": 5}, 
     ...   valuations       = {"Alice": {"c1": 11, "c2": 22}, "Bob": {"c1": 33, "c2": 44}})
     >>> list(instance.agents)
     ['Alice', 'Bob']
@@ -40,8 +41,6 @@ class Instance:
     2
     >>> instance.item_capacity("c2")
     5
-    >>> instance.item_weight("c1")
-    4
     >>> instance.agent_item_value("Bob", "c1")
     33
     >>> instance.agent_bundle_value("Bob", ["c1","c2"])
@@ -49,7 +48,7 @@ class Instance:
     >>> instance.agent_fractionalbundle_value("Bob", {"c1":1, "c2":0.5})
     55.0
     >>> instance.agent_maximum_value("Alice")
-    22
+    33
     >>> instance.agent_maximum_value("Bob")
     77
     >>> instance.agent_ranking("Alice", [])
@@ -59,18 +58,76 @@ class Instance:
     >>> instance.agent_ranking("Alice", ["c2"])
     {'c2': 1, 'c1': 2}
 
+    ### dict of dicts, with weights:
+    >>> instance = Instance(
+    ...   agent_capacities = {"Alice": 2, "Bob": 2},
+    ...   item_capacities  = {"c1": 2, "c2": 1},
+    ...   agent_target_weights = {"Alice": 4, "Bob": 8},
+    ...   item_weights     = {"c1": 4, "c2": 5},
+    ...   valuations       = {"Alice": {"c1": 80, "c2": 20}, "Bob": {"c1": 70, "c2": 30}})
+    >>> list(instance.agents)
+    ['Alice', 'Bob']
+    >>> list(instance.items)
+    ['c1', 'c2']
+    >>> instance.agent_capacity("Alice")
+    2
+    >>> instance.item_capacity("c2")
+    1
+    >>> instance.item_weight("c1")
+    4
+    >>> instance.agent_item_value("Bob", "c1")
+    70
+    >>> instance.agent_bundle_value("Bob", ["c1","c2"])
+    100
+    >>> instance.agent_maximum_value("Alice")
+    80
+    >>> instance.agent_maximum_value("Bob")
+    100
+    >>> instance.agent_ranking("Alice", [])
+    {'c1': 1, 'c2': 2}
+    >>> instance.agent_ranking("Alice", ["c1"])
+    {'c1': 1, 'c2': 2}
+    >>> instance.agent_ranking("Alice", ["c2"])
+    {'c1': 1, 'c2': 2}
+
+    ### dict of dicts, with weights but no agent capacities:
+    >>> instance = Instance(
+    ...   agent_target_weights = {"Alice": 10, "Bob": 15},
+    ...   item_weights     = {"c1": 4, "c2": 6, "c3": 5},
+    ...   item_capacities  = {"c1": 2, "c2": 2, "c3": 2},
+    ...   valuations       = {"Alice": {"c1": 50, "c2": 70, "c3": 60}, "Bob": {"c1": 40, "c2": 80, "c3": 90}})
+    >>> list(instance.agents)
+    ['Alice', 'Bob']
+    >>> list(instance.items)
+    ['c1', 'c2', 'c3']
+    >>> instance.agent_target_weight("Alice")
+    10
+    >>> instance.agent_target_weight("Bob")
+    15
+    >>> instance.item_weight("c1")
+    4
+    >>> instance.item_weight("c2")
+    6
+    >>> instance.item_weight("c3")
+    5
+    >>> instance.agent_item_value("Alice", "c2")
+    70
+    >>> instance.agent_item_value("Bob", "c3")
+    90
+    >>> instance.agent_maximum_value("Alice")
+    130
+    >>> instance.agent_maximum_value("Bob")
+    210
+
     ### dict of lists:
     >>> instance = Instance(
-    ...   agent_capacities = {"Alice": 7, "Bob": 10}, 
+    ...   agent_capacities = {"Alice": 2, "Bob": 3}, 
     ...   item_capacities  = [1,2,3,4], 
-    ...   item_weights     = [2,4,4,3],
     ...   valuations       = {"Alice": [22,33,44,55], "Bob": [66,77,88,99]})
     >>> instance.agent_capacity("Alice")
-    7
+    2
     >>> instance.item_capacity(2)
     3
-    >>> instance.item_weight(1)
-    4
     >>> instance.agent_item_value("Alice", 3)
     55
     >>> instance.agent_maximum_value("Alice")
@@ -116,18 +173,19 @@ class Instance:
     {'Alice'}
     """
 
-    def __init__(self, valuations:any, agent_capacities:any=None, agent_entitlements:any=None, item_capacities:any=None, item_weights:any=None, agent_conflicts:any=None, item_conflicts:any=None, agents:list=None, items:list=None):
+    def __init__(self, valuations:any, agent_capacities:any=None, agent_target_weights:any=None, agent_entitlements:any=None, item_capacities:any=None, item_weights:any=None, agent_conflicts:any=None, item_conflicts:any=None, agents:list=None, items:list=None, item_categories=None, category_capacities=None):
         """
         Initialize an instance from the given 
         """
         agent_value_keys, item_value_keys, agent_item_value_func = get_keys_and_mapping_2d(valuations)
 
         agent_capacity_keys, agent_capacity_func = get_keys_and_mapping(agent_capacities)
+        agent_target_weight_keys, agent_target_weight_func = get_keys_and_mapping(agent_target_weights)
         agent_entitlement_keys, agent_entitlement_func = get_keys_and_mapping(agent_entitlements)
         item_capacity_keys , item_capacity_func  = get_keys_and_mapping(item_capacities)
         item_weight_keys , item_weight_func  = get_keys_and_mapping(item_weights)
 
-        self.agents = agents or agent_value_keys or agent_capacity_keys or agent_entitlement_keys 
+        self.agents = agents or agent_value_keys or agent_capacity_keys or agent_target_weight_keys or agent_entitlement_keys 
         assert (self.agents is not None)
         self.num_of_agents = len(self.agents)
         self.items  = items or item_capacity_keys or item_value_keys or item_weight_keys
@@ -135,19 +193,42 @@ class Instance:
         self.num_of_items = len(self.items)
 
         self.agent_capacity = agent_capacity_func or constant_function(len(self.items))
+        self.item_weight = item_weight_func or constant_function(1)
+        import math
+        self.agent_target_weight = agent_target_weight_func or constant_function(math.inf) 
         self.agent_entitlement = agent_entitlement_func or constant_function(1)
         self.item_capacity  = item_capacity_func  or constant_function(1)
-        self.item_weight = item_weight_func or constant_function(1)
         self.agent_item_value = agent_item_value_func
 
         self.agent_conflicts = get_conflicts(agent_conflicts) or constant_function(set())
         self.item_conflicts = get_conflicts(item_conflicts) or constant_function(set())
 
         # Keep the input parameters, for debug
-        self._agent_capacities = agent_capacities
-        self._item_capacities  = item_capacities
-        self._item_weights     = item_weights
-        self._valuations       = valuations
+        self._agent_capacities     = agent_capacities
+        self._agent_target_weights = agent_target_weights
+        self._item_capacities      = item_capacities
+        self._item_weights         = item_weights
+        self._valuations           = valuations
+
+        # Category related fields
+        self.categories = get_keys_and_mapping(category_capacities)
+        self.categories_capacities = category_capacities
+        self.item_categories = item_categories
+        self.categories_items = build_categories_items(item_categories) if item_categories else None
+        if category_capacities is None:
+            self.agents_category_capacities = None
+        else:
+            self.agents_category_capacities = {agent: category_capacities.copy() for agent in valuations}
+
+        # Category related fields
+        self.categories = get_keys_and_mapping(category_capacities)
+        self.categories_capacities = category_capacities
+        self.item_categories = item_categories
+        self.categories_items = build_categories_items(item_categories) if item_categories else None
+        if category_capacities is None:
+            self.agents_category_capacities = None
+        else:
+            self.agents_category_capacities = {agent: category_capacities.copy() for agent in valuations}
 
         self.validate()
     
@@ -209,8 +290,9 @@ class Instance:
         return f"""
  * {self.num_of_agents} agents: {list(self.agents)}
  * {self.num_of_items} items: {list(self.items)}
- * agent capacities: { {agent: self.agent_capacity(agent) for agent in self.agents} }
- * agent conflicts:  { {agent: self.agent_conflicts(agent) for agent in self.agents} }
+ * agent capacities:     { {agent: self.agent_capacity(agent) for agent in self.agents} }
+ * agent target weights: { {agent: self.agent_target_weight(agent) for agent in self.agents} }
+ * agent conflicts:      { {agent: self.agent_conflicts(agent) for agent in self.agents} }
  * item capacities:  { {item: self.item_capacity(item) for item in self.items} }
  * item weights:     { {item: self.item_weight(item) for item in self.items} }
  * item conflicts:  { {item: self.item_conflicts(item) for item in self.items} }
@@ -224,12 +306,15 @@ class Instance:
         """
         sorted_items = sorted(self.items, key=lambda item: self.agent_item_value(agent, item), reverse=True)
         capacity = self.agent_capacity(agent)
+        target_weight = self.agent_target_weight(agent)
         total_value = 0
         total_weight = 0
+        total_capacity = 0
         for item in sorted_items:
             total_weight += self.item_weight(item)
             total_value += self.agent_item_value(agent, item)
-            if total_weight >= capacity:
+            total_capacity += 1
+            if total_capacity == capacity or total_weight >= target_weight:
                 return total_value
         return total_value
 
@@ -256,6 +341,7 @@ class Instance:
                normalized_sum_of_values:int,
                agent_name_template="s{index}", item_name_template="c{index}",
                random_seed:int=None,
+               agent_target_weight_bounds:tuple[int,int]=None,
                item_weight_bounds:tuple[float,float]=None,
                ):
         """
@@ -278,9 +364,12 @@ class Instance:
             for agent in agents
         }
         item_weights = None
+        agent_target_weights = None
         if item_weight_bounds:
             item_weights = {item: np.round(np.random.uniform(item_weight_bounds[0], item_weight_bounds[1]+1)) for item in items}    
-        return Instance(valuations=valuations, agent_capacities=agent_capacities, item_capacities=item_capacities, item_weights=item_weights)
+        if agent_target_weight_bounds:
+            agent_target_weights =  {agent: np.random.randint(agent_target_weight_bounds[0], agent_target_weight_bounds[1]+1) for agent in agents}
+        return Instance(valuations=valuations, agent_capacities=agent_capacities, agent_target_weights=agent_target_weights, item_capacities=item_capacities, item_weights=item_weights)
     
 
     @staticmethod
@@ -332,7 +421,7 @@ class Instance:
     @staticmethod
     def random_sample(max_num_of_agents:int, max_total_agent_capacity:int,
         prototype_valuations:dict, prototype_agent_capacities:dict, prototype_agent_conflicts:dict,
-        item_capacities:dict, item_conflicts:dict, item_weights:dict=None,
+        item_capacities:dict, item_conflicts:dict, prototype_agent_target_weights:dict=None, item_weights:dict=None,
         random_seed:int=None,
         ):
         """
@@ -350,13 +439,17 @@ class Instance:
         prototype_agents = list(prototype_valuations.keys())
 
         agent_capacities = dict()
+        agent_target_weights = dict()
         agent_conflicts = dict()
         valuations = dict()
 
         def add_agent(new_agent, prototype_agent):
-            nonlocal max_total_agent_capacity, max_num_of_agents, agent_capacities, valuations, agent_conflicts
+            nonlocal max_total_agent_capacity, max_num_of_agents, agent_capacities, agent_target_weights, valuations, agent_conflicts
             new_agent_capacity = prototype_agent_capacities[prototype_agent]
             agent_capacities[new_agent] = new_agent_capacity
+            if prototype_agent_target_weights:
+                new_agent_target_weight = prototype_agent_target_weights[prototype_agent]
+                agent_target_weights[new_agent] = new_agent_target_weight
             if prototype_agent in prototype_agent_conflicts:
                 agent_conflicts[new_agent]  = prototype_agent_conflicts[prototype_agent]
             valuations[new_agent] = prototype_valuations[prototype_agent]
@@ -379,7 +472,8 @@ class Instance:
                 break
             i += 1
 
-        return Instance(valuations=valuations, agent_capacities=agent_capacities, agent_conflicts=agent_conflicts,
+        return Instance(valuations=valuations, agent_capacities=agent_capacities, agent_target_weights=agent_target_weights,
+                         agent_conflicts=agent_conflicts,
                         item_capacities=item_capacities, item_weights=item_weights, item_conflicts=item_conflicts)
 
 
@@ -398,6 +492,33 @@ def random_valuation(numitems:int, item_value_bounds: tuple[float,float])->np.nd
 def normalized_valuation(raw_valuations:np.ndarray, normalized_sum_of_values:float):
     raw_sum_of_values = sum(raw_valuations)
     return  np.round(raw_valuations * normalized_sum_of_values / raw_sum_of_values).astype(int)
+
+
+def build_categories_items(item_categories):
+    """
+    Creates a dictionary where each category maps to a list of its items.
+
+    Args:
+        item_categories (dict): A mapping from item IDs to category names.
+
+    Returns:
+        dict: A mapping from category names to lists of item IDs.
+
+    Example:
+    >>> item_categories = {
+    ...     "o1": "cat1", "o2": "cat1", "o3": "cat1", "o4": "cat1",
+    ...     "o5": "cat2", "o6": "cat2"
+    ... }
+    >>> result = build_categories_items(item_categories)
+    >>> result["cat1"].sort()
+    >>> result["cat2"].sort()
+    >>> result == {'cat1': ['o1', 'o2', 'o3', 'o4'], 'cat2': ['o5', 'o6']}
+    True
+    """
+    categories_items = defaultdict(list)
+    for item, category in item_categories.items():
+        categories_items[category].append(item)
+    return dict(categories_items)
 
 
 def get_keys_and_mapping(container: any) -> tuple[list,callable]:
@@ -596,6 +717,7 @@ if __name__ == "__main__":
     print("items: ", random_instance.items)
     print("valuations: ", dict(random_instance._valuations), "\n")
 
+    
 
     # Test the cache    
     # print(random_instance.agent_maximum_value("s1"))

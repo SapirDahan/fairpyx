@@ -14,23 +14,49 @@ def validate_allocation(instance:Instance, allocation:dict, title:str="", allow_
     """
     Validate that the given allocation is feasible for the given input-instance.
     Checks agent capacities, item capacities, and uniqueness of items.
-
     >>> instance = Instance(
-    ...   agent_capacities = {"Alice": 4, "Bob": 8}, 
+    ...   agent_capacities = {"Alice": 2, "Bob": 3}, 
     ...   item_capacities  = {"c1": 1, "c2": 2, "c3": 3}, 
-    ...   item_weights     = {"c1": 4, "c2": 3, "c3": 2}, 
     ...   valuations       = {"Alice": {"c1": 11, "c2": 22, "c3": 33}, "Bob": {"c1": 33, "c2": 44, "c3": 55}})
     >>> validate_allocation(instance, allocation = {"Alice": ["c1", "c2"]})
     >>> validate_allocation(instance, allocation = {"Alice": ["c1", "c2", "c3"]})
     Traceback (most recent call last):
     ...
-    ValueError: : Agent Alice has capacity 4, but received more items: ['c1', 'c2', 'c3'] with total weight: 9.
+    ValueError: : Agent Alice has capacity 2, but received more items: ['c1', 'c2', 'c3'].
+    >>> validate_allocation(instance, allocation = {"Alice": ["c1", "c1"]})
+    Traceback (most recent call last):
+    ...
+    ValueError: : Agent Alice received two or more copies of the same item. Bundle: ['c1', 'c1'].
+    >>> validate_allocation(instance, allocation = {"Alice": ["c1", "c2"], "Bob": ["c2","c3"]})
+    >>> validate_allocation(instance, allocation = {"Alice": ["c1", "c2"], "Bob": ["c2","c1"]})
+    Traceback (most recent call last):
+    ...
+    ValueError: : Item c1 has capacity 1, but is given to more agents: ['Alice', 'Bob'].
+    >>> validate_allocation(instance, allocation = {"Alice": ["c1"], "Bob": ["c2","c3"]})
+    Traceback (most recent call last):
+    ...
+    ValueError: : Wasteful allocation:
+    Item c2 has remaining capacity: 2>['Bob'].
+    Agent Alice has remaining capacity: 2>['c1'] with remaining weight: inf (bundle weight: 2).
+    Agent Alice values Item c2 at 22.
+
+    >>> instance = Instance(
+    ...   agent_capacities = {"Alice": 2, "Bob": 3}, 
+    ...   agent_target_weights = {"Alice": 4, "Bob": 8}, 
+    ...   item_capacities  = {"c1": 1, "c2": 2, "c3": 3}, 
+    ...   item_weights     = {"c1": 4, "c2": 3, "c3": 2}, 
+    ...   valuations       = {"Alice": {"c1": 11, "c2": 22, "c3": 33}, "Bob": {"c1": 33, "c2": 44, "c3": 55}})
+    >>> validate_allocation(instance, allocation = {"Alice": ["c2", "c3"]})
+    >>> validate_allocation(instance, allocation = {"Alice": ["c1", "c2", "c3"]})
+    Traceback (most recent call last):
+    ...
+    ValueError: : Agent Alice has capacity 2, but received more items: ['c1', 'c2', 'c3'].
     >>> validate_allocation(instance, allocation = {"Alice": ["c2", "c2"]})
     Traceback (most recent call last):
     ...
     ValueError: : Agent Alice received two or more copies of the same item. Bundle: ['c2', 'c2'].
-    >>> validate_allocation(instance, allocation = {"Alice": ["c1", "c2"], "Bob": ["c2","c3"]})
-    >>> validate_allocation(instance, allocation = {"Alice": ["c1", "c2"], "Bob": ["c2","c1"]})
+    >>> validate_allocation(instance, allocation = {"Alice": ["c2", "c3"], "Bob": ["c1","c2","c3"]})
+    >>> validate_allocation(instance, allocation = {"Alice": ["c1", "c2"], "Bob": ["c2","c1","c3"]})
     Traceback (most recent call last):
     ...
     ValueError: : Item c1 has capacity 1, but is given to more agents: ['Alice', 'Bob'].
@@ -39,7 +65,7 @@ def validate_allocation(instance:Instance, allocation:dict, title:str="", allow_
     ...
     ValueError: : Wasteful allocation:
     Item c3 has remaining capacity: 3>['Bob'].
-    Agent Alice has remaining capacity: 4>['c2'].
+    Agent Alice has remaining capacity: 2>['c2'] with remaining weight: 4 (bundle weight: 5).
     Agent Alice values Item c3 at 33.
     """
 
@@ -47,13 +73,16 @@ def validate_allocation(instance:Instance, allocation:dict, title:str="", allow_
     agents_below_their_capacity = []
     for agent,bundle in allocation.items():
         agent_capacity = instance.agent_capacity(agent)
+        agent_target_weight = instance.agent_target_weight(agent)
         bundle_weights = [instance.item_weight(item) for item in bundle]
         bundle_total_weight = sum(bundle_weights)
-        if bundle_total_weight > agent_capacity and bundle_total_weight - max(bundle_weights) >= agent_capacity: 
-            raise ValueError(f"{title}: Agent {agent} has capacity {agent_capacity}, but received more items: {bundle} with total weight: {bundle_total_weight}.")
+        if len(bundle) > agent_capacity:
+            raise ValueError(f"{title}: Agent {agent} has capacity {agent_capacity}, but received more items: {bundle}.")
+        if bundle_total_weight > agent_target_weight and bundle_total_weight - max(bundle_weights) >= agent_target_weight: 
+            raise ValueError(f"{title}: Agent {agent} has target weight {agent_target_weight}, but received more items: {bundle} with total weight: {bundle_total_weight}.")
         if (not allow_multiple_copies) and len(set(bundle))!=len(bundle):
             raise ValueError(f"{title}: Agent {agent} received two or more copies of the same item. Bundle: {bundle}.")
-        if bundle_total_weight < agent_capacity:
+        if len(bundle)< agent_capacity and bundle_total_weight < agent_target_weight:
             agents_below_their_capacity.append(agent)
 
     ### validate item capacity:
@@ -76,7 +105,7 @@ def validate_allocation(instance:Instance, allocation:dict, title:str="", allow_
             value = instance.agent_item_value(agent,item)
             if item not in bundle and value>0:
                 item_message = f"Item {item} has remaining capacity: {instance.item_capacity(item)}>{map_item_to_list_of_owners[item]}."
-                agent_message = f"Agent {agent} has remaining capacity: {instance.agent_capacity(agent)}>{bundle}."
+                agent_message = f"Agent {agent} has remaining capacity: {instance.agent_capacity(agent)}>{bundle} with remaining weight: {instance.agent_target_weight(agent)} (bundle weight: {bundle_total_weight})."
                 value_message = f"Agent {agent} values Item {item} at {value}."
                 raise ValueError(f"{title}: Wasteful allocation:\n{item_message}\n{agent_message}\n{value_message}")
 
@@ -118,38 +147,41 @@ class AllocationBuilder:
     >>> instance = Instance(
     ...   agent_capacities = {"Alice": 2, "Bob": 3}, 
     ...   item_capacities  = {"c1": 4, "c2": 5}, 
-    ...   item_weights     = {"c1": 2, "c2": 4},
     ...   valuations       = {"Alice": {"c1": 11, "c2": 22}, "Bob": {"c1": 33, "c2": 44}})
     >>> alloc = AllocationBuilder(instance)
-    >>> alloc.give('Bob', 'c1')
+    >>> alloc.give('Alice', 'c1')
     >>> alloc.remaining_agent_capacities
-    {'Alice': 2, 'Bob': 1}
+    {'Alice': 1, 'Bob': 3}
     >>> alloc.remaining_item_capacities
     {'c1': 3, 'c2': 5}
     >>> alloc.remaining_conflicts
-    {('Bob', 'c1')}
+    {('Alice', 'c1')}
 
     >>> instance = Instance(
     ...   agent_capacities = {"Alice": 2, "Bob": 3}, 
     ...   item_capacities  = {"c1": 4, "c2": 5}, 
-    ...   item_weights     = {"c1": 2, "c2": 4},
     ...   valuations       = {"Alice": {"c1": 11, "c2": 22}, "Bob": {"c1": 33, "c2": 44}},
-    ...   agent_conflicts  = {"Alice": ["c2"]},
+    ...   agent_conflicts  = {"Bob": ["c2"]},
     ...   item_conflicts  = {"c1": ["c2"]})
     >>> alloc = AllocationBuilder(instance)
     >>> alloc.remaining_conflicts
-    {('Alice', 'c2')}
-    >>> alloc.give('Bob', 'c1')    
+    {('Bob', 'c2')}
+    >>> alloc.give('Alice', 'c1')    
     >>> sorted(alloc.remaining_conflicts)
-    [('Alice', 'c2'), ('Bob', 'c1'), ('Bob', 'c2')]
+    [('Alice', 'c1'), ('Alice', 'c2'), ('Bob', 'c2')]
     """
     def __init__(self, instance:Instance):
         self.instance = instance
         self.allow_multiple_copies = False
         self.remaining_agent_capacities = {agent: instance.agent_capacity(agent) for agent in instance.agents if instance.agent_capacity(agent) > 0}
+        self.remaining_agent_target_weights = {agent: instance.agent_target_weight(agent) for agent in instance.agents if instance.agent_target_weight(agent) > 0}        
         self.remaining_item_capacities = {item: instance.item_capacity(item) for item in instance.items if instance.item_capacity(item) > 0}
         self.remaining_conflicts = {(agent,item) for agent in self.remaining_agents() for item in self.instance.agent_conflicts(agent)}
         self.bundles = {agent: set() for agent in instance.agents}    # Each bundle is a set, since each agent can get at most one seat in each course
+        if instance.agents_category_capacities is not None:
+            self.agents_category_capacities = {agent: instance.agents_category_capacities[agent].copy() for agent in instance.agents}
+        else:
+            self.agents_category_capacities = None
 
     def set_allow_multiple_copies(self, flag):
         self.allow_multiple_copies = flag
@@ -160,7 +192,8 @@ class AllocationBuilder:
         """
         Return True if either all items or all agents have exhausted their capacity - so we are done.
         """
-        return len(self.remaining_item_capacities) == 0 or len(self.remaining_agent_capacities) == 0
+        return len(self.remaining_item_capacities) == 0 or len(self.remaining_agent_capacities) == 0 or\
+              len(self.remaining_agent_target_weights) == 0
 
     def remaining_items(self)->list:
         """
@@ -179,8 +212,8 @@ class AllocationBuilder:
         """
         Return the agents with positive remaining capacity.
         """
-        return self.remaining_agent_capacities.keys()
-
+        return [x for x in self.remaining_agent_capacities.keys() if x in self.remaining_agent_target_weights.keys()]
+    
     def remaining_instance(self)->Instance:
         """
         Construct a fresh input instance, based on the remaining agents and items.
@@ -188,6 +221,7 @@ class AllocationBuilder:
         return Instance(
             valuations=self.instance.agent_item_value,                 # base valuations are the same as in the original instance
             agent_capacities=self.remaining_agent_capacities,          # agent capacities may be smaller than in the original instance
+            agent_target_weights=self.remaining_agent_target_weights,  # agent target weights may be smaller than in the original instance
             agent_entitlements=self.instance.agent_entitlement,        # agent entitlement is the same as in the original instance
             agent_conflicts=self.instance.agent_conflicts,             # agent conflicts are the same as in the original instance
             agents=self.remaining_agents(),                            # agent list may be smaller than in the original instance
@@ -220,14 +254,21 @@ class AllocationBuilder:
         Remove the given agent from further consideration by the allocation algorithm (the agent keeps holding his items)
         """
         del self.remaining_agent_capacities[agent]
+        del self.remaining_agent_target_weights[agent]
 
     def give(self, agent:any, item:any, logger=None):
         if agent not in self.remaining_agent_capacities:
             raise ValueError(f"Agent {agent} has no remaining capacity for item {item}")
+        if agent not in self.remaining_agent_target_weights:
+            raise ValueError(f"Agent {agent} has no remaining target weight for item {item}")
         if item not in self.remaining_item_capacities:
             raise ValueError(f"Item {item} has no remaining capacity for agent {agent}")
         if (agent,item) in self.remaining_conflicts:
             raise ValueError(f"Agent {agent} is not allowed to take item {item} due to a conflict")
+        if self.agents_category_capacities is not None:
+            if self.agents_category_capacities[agent][self.instance.item_categories[item]] <= 0:
+                raise ValueError(f"Agent {agent} has no remaining capacity for item {item} in category {self.instance.item_categories[item]}")
+
         if self.allow_multiple_copies:
             self.bundles[agent].append(item)
         else:
@@ -236,12 +277,15 @@ class AllocationBuilder:
             logger.info("Agent %s takes item %s with value %s", agent, item, self.instance.agent_item_value(agent, item))
         
         # Update capacities:
-        self.remaining_agent_capacities[agent] -= self.instance.item_weight(item)
-        if self.remaining_agent_capacities[agent] <= 0:
+        self.remaining_agent_capacities[agent] -= 1
+        self.remaining_agent_target_weights[agent] -= self.instance.item_weight(item)
+        if self.remaining_agent_capacities[agent] <= 0 or self.remaining_agent_target_weights[agent] <= 0:
             self.remove_agent_from_loop(agent)
         self.remaining_item_capacities[item] -= 1
         if self.remaining_item_capacities[item] <= 0:
             self.remove_item_from_loop(item)
+        if self.instance.agents_category_capacities is not None:
+            self.agents_category_capacities[agent][self.instance.item_categories[item]] -= 1
         if not self.allow_multiple_copies:
             self._update_conflicts(agent,item)
 
@@ -268,8 +312,11 @@ class AllocationBuilder:
             if num_of_items==0: continue
             if agent not in self.remaining_agent_capacities or self.remaining_agent_capacities[agent]<num_of_items:
                 raise ValueError(f"Agent {agent} has no remaining capacity for {num_of_items} new items")
-            self.remaining_agent_capacities[agent] -= map_agent_to_weights_of_items[agent]
-            if self.remaining_agent_capacities[agent] <= 0:
+            if agent not in self.remaining_agent_target_weights or self.remaining_agent_target_weights[agent]<map_agent_to_weights_of_items[agent]:
+                raise ValueError(f"Agent {agent} has no remaining weight for items with weight {map_agent_to_weights_of_items[agent]}")
+            self.remaining_agent_target_weights[agent] -= map_agent_to_weights_of_items[agent]
+            self.remaining_agent_capacities[agent] -= map_agent_to_num_of_items[agent]
+            if self.remaining_agent_capacities[agent] <= 0 or self.remaining_agent_target_weights[agent] <= 0:
                 self.remove_agent_from_loop(agent)
 
         for item,num_of_owners in map_item_to_num_of_owners.items():
@@ -282,7 +329,7 @@ class AllocationBuilder:
 
         for agent,bundle in new_bundles.items():
             self.bundles[agent].update(bundle)
-            self._update_conflicts(agent,item)
+            # self._update_conflicts(agent,item) i put that in comment because it dosent make sense to update conflicts for the  item from the loop its always the same one and its un related
 
     def _update_conflicts(self, receiving_agent:any, received_item:any):
         """
@@ -296,6 +343,33 @@ class AllocationBuilder:
 
     def sorted(self):
         return {agent: sorted(bundle) for agent,bundle in self.bundles.items()}
+
+    def remove_item(self, agent:any, item:any):
+        """
+        Remove the item from the agent's bundle.
+        """
+        if self.allow_multiple_copies:
+            self.bundles[agent].remove(item)
+        else:
+            self.bundles[agent].discard(item)
+        self.remaining_agent_capacities[agent] += 1
+        self.remaining_agent_target_weights[agent] += self.instance.item_weight(item)
+        self.remaining_item_capacities[item] = self.remaining_item_capacities.get(item, 0) + 1
+        if self.instance.agents_category_capacities is not None:
+            self.agents_category_capacities[agent][self.instance.item_categories[item]] += 1
+        if (agent,item) in self.remaining_conflicts:
+            self._remove_single_conflict(agent,item)
+
+    def swap(self, agent1, item1, agent2, item2, logger=None):
+        self.remove_item(agent1, item1)
+        self.remove_item(agent2, item2)
+        self.give(agent1, item2, logger=logger)
+        self.give(agent2, item1, logger=logger)
+
+    def _remove_single_conflict(self, agent:any, item:any):
+        self.remaining_conflicts.remove( (agent,item) )
+
+
 
 
 if __name__ == "__main__":

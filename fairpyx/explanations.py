@@ -17,8 +17,8 @@ TEXTS = {
 		"en": "These are the values you assigned to the courses:",
 	},
 	"you_need": {
-		"he": "ביקשת %d נקודות זכות, אז הערך הגבוה ביותר האפשרי עבורך הוא %g.",
-		"en": "You need %d credit points, so your maximum possible value is %g.",
+		"he": "ביקשת %d קורסים כאשר נותרו לך %d נקודות זכות, ולכן הערך הגבוה ביותר האפשרי עבורך הוא %g.",
+		"en": "You requested %d courses with %d credit points remaining, so your maximum possible value is %g.",
 	},
 	"your_bundle": {
 		"he": "אלה הקורסים שקיבלת:",
@@ -33,9 +33,9 @@ TEXTS = {
 		"en": "Course %s (number %d in your ranking), with value %g and weight %.2f",
 	},
 	"your_maximum_value": {
-		"he": "הניקוד הגבוה ביותר שיכולת לקבל על  %d נקודות זכות הוא %g.",
-		"en": "The maximum possible value you could get for %d credit points is %g.",
-	},
+        "he": "הניקוד הגבוה ביותר שיכולת לקבל עבור %d קורסים עם יתרה של %d נקודות זכות הוא %g.",
+        "en": "The maximum possible value you could get for %d courses with %d remaining credit points is %g.",
+    },
 	"your_actual_value": {
 		"he": "הניקוד הכולל של הקורסים שקיבלת הוא %g, שהוא %g%% מהמקסימום.",
 		"en": "The total value of your bundle is %g, which is %g%% of the maximum.",
@@ -69,7 +69,7 @@ class ExplanationLogger:
             self.info(_("your_valuations"), agents=agent)
             for item in sorted(instance.items, key=lambda item: instance.agent_item_value(agent,item), reverse=True):
                 self.info(" * %s: %g", item, instance.agent_item_value(agent,item), agents=agent)
-            self.info(_("you_need"), instance.agent_capacity(agent), instance.agent_maximum_value(agent), agents=agent)
+            self.info(_("you_need"), instance.agent_capacity(agent), instance.agent_target_weight(agent), instance.agent_maximum_value(agent), agents=agent)
 
     def explain_allocation(self, allocation:dict, instance:Instance, map_course_to_name:dict={}):
         def _(code:str): return TEXTS[code][self.language]
@@ -81,7 +81,7 @@ class ExplanationLogger:
             absolute_value = instance.agent_bundle_value(agent,bundle)
             maximum_value  = instance.agent_maximum_value(agent)
             relative_value = absolute_value/maximum_value*100
-            self.info(_("your_maximum_value"), instance.agent_capacity(agent), maximum_value, agents=agent)
+            self.info(_("your_maximum_value"), instance.agent_capacity(agent), instance.agent_target_weight(agent), maximum_value, agents=agent)
             self.info(_("your_actual_value"), absolute_value, np.round(relative_value), agents=agent)
 
     def explain_fractional_allocation(self, fractional_allocation:dict, instance:Instance, map_course_to_name:dict={}):
@@ -95,7 +95,7 @@ class ExplanationLogger:
             absolute_value = instance.agent_fractionalbundle_value(agent,bundle)
             maximum_value  = instance.agent_maximum_value(agent)
             relative_value = absolute_value/maximum_value*100
-            self.info(_("your_maximum_value"), instance.agent_capacity(agent), maximum_value, agents=agent)
+            self.info(_("your_maximum_value"), instance.agent_capacity(agent), instance.agent_target_weight(agent), maximum_value, agents=agent)
             self.info(_("your_actual_fractional_value"), absolute_value, np.round(relative_value), agents=agent)
 
 
