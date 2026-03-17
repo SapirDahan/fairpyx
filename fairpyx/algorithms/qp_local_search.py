@@ -669,7 +669,7 @@ def qp_max_min_allocation(instance: Instance, epsilon: float = 0.1) -> Dict[Any,
     Zero-value instance returns empty bundles:
     >>> instance0 = Instance(valuations={"Alice": {"x": 0}, "Bob": {"x": 0}})
     >>> qp_max_min_allocation(instance0)
-    {'Alice': set(), 'Bob': set()}
+    {'Alice': [], 'Bob': []}
     """
     logger.info(f"\n{'='*60}")
     logger.info(f"QUASI-POLYNOMIAL MAX-MIN ALLOCATION")
