@@ -12,6 +12,7 @@ import pytest
 import random
 import fairpyx
 from fairpyx import Instance
+from fairpyx.adaptors import divide
 from fairpyx.algorithms.qp_local_search import (
     qp_max_min_allocation,
 )
@@ -40,7 +41,7 @@ def test_single_agent_single_item():
     """
     instance = Instance(valuations={"p0": {"r1": 10}})
 
-    result = qp_max_min_allocation(instance, epsilon=0.1)
+    result = divide(qp_max_min_allocation, instance=instance, epsilon=0.1)
     assert result == {'p0': ['r1']}
     fairpyx.validate_allocation(instance, result, title="test_single_agent_single_item")
     assert_threshold(instance, result, opt=10)
@@ -56,7 +57,7 @@ def test_two_agents_shared_item():
         "p1": {"r1": 0, "r2": 5, "r3": 10},
     })
 
-    result = qp_max_min_allocation(instance, epsilon=0.1)
+    result = divide(qp_max_min_allocation, instance=instance, epsilon=0.1)
     fairpyx.validate_allocation(instance, result, title="test_two_agents_shared_item")
     assert_threshold(instance, result, opt=10)  # p0={r1}=10, p1={r3}=10
 
@@ -71,7 +72,7 @@ def test_two_agents_unequal_items():
         "p1": {"r1": 3, "r2": 3, "r3": 0},
     })
 
-    result = qp_max_min_allocation(instance, epsilon=0.1)
+    result = divide(qp_max_min_allocation, instance=instance, epsilon=0.1)
     fairpyx.validate_allocation(instance, result, title="test_two_agents_unequal_items")
     assert_threshold(instance, result, opt=6)  # p0={r3}=10, p1={r1,r2}=6
 
@@ -87,7 +88,7 @@ def test_three_agents_four_items():
         "p2": {"r1": 0, "r2": 0, "r3": 8, "r4": 3},
     })
 
-    result = qp_max_min_allocation(instance, epsilon=0.1)
+    result = divide(qp_max_min_allocation, instance=instance, epsilon=0.1)
     fairpyx.validate_allocation(instance, result, title="test_three_agents_four_items")
     assert_threshold(instance, result, opt=8)  # p0={r1}=10, p1={r2,r4}=8, p2={r3}=8
 
@@ -102,7 +103,7 @@ def test_symmetric_eligibility():
         "p1": {"r1": 0, "r2": 0, "r3": 6, "r4": 8},
     })
 
-    result = qp_max_min_allocation(instance, epsilon=0.1)
+    result = divide(qp_max_min_allocation, instance=instance, epsilon=0.1)
     fairpyx.validate_allocation(instance, result, title="test_symmetric_eligibility")
     assert_threshold(instance, result, opt=14)  # p0={r1,r2}=14, p1={r3,r4}=14
 
@@ -117,7 +118,7 @@ def test_zero_value_item():
     """
     instance = Instance(valuations={"p0": {"r1": 0}})
 
-    result = qp_max_min_allocation(instance, epsilon=0.1)
+    result = divide(qp_max_min_allocation, instance=instance, epsilon=0.1)
     assert result == {"p0": []}
 
 
@@ -131,7 +132,7 @@ def test_single_dominant_item():
         "p0": val, "p1": val, "p2": val, "p3": val,
     })
 
-    result = qp_max_min_allocation(instance, epsilon=0.1)
+    result = divide(qp_max_min_allocation, instance=instance, epsilon=0.1)
     fairpyx.validate_allocation(instance, result, title="test_single_dominant_item")
     assert_threshold(instance, result, opt=2)  # 4 agents sharing 4 small items of size 2
 
@@ -144,7 +145,7 @@ def test_all_agents_eligible_for_everything():
     val = {"r1": 12, "r2": 8, "r3": 6, "r4": 4}
     instance = Instance(valuations={"p0": val, "p1": val})
 
-    result = qp_max_min_allocation(instance, epsilon=0.1)
+    result = divide(qp_max_min_allocation, instance=instance, epsilon=0.1)
     fairpyx.validate_allocation(instance, result, title="test_all_agents_eligible_for_everything")
     assert_threshold(instance, result, opt=14)  # p0={r1,r4}=16, p1={r2,r3}=14
 
@@ -159,7 +160,7 @@ def test_disjoint_eligibility():
         "p2": {"r1": 0, "r2": 0, "r3": 0, "r4": 0, "r5": 4, "r6": 6},  # total = 10
     })
 
-    result = qp_max_min_allocation(instance, epsilon=0.1)
+    result = divide(qp_max_min_allocation, instance=instance, epsilon=0.1)
     fairpyx.validate_allocation(instance, result, title="test_disjoint_eligibility")
     assert_threshold(instance, result, opt=10)  # each agent gets their 2 items totaling 10
 
@@ -178,6 +179,6 @@ def test_large_input():
     item_sizes = {item: rng.randint(5, 20) for item in items}
     agents = [f"p{i}" for i in range(10)]
     instance = Instance(valuations={agent: dict(item_sizes) for agent in agents})
-    result = qp_max_min_allocation(instance, epsilon=0.1)
+    result = divide(qp_max_min_allocation, instance=instance, epsilon=0.1)
 
     fairpyx.validate_allocation(instance, result, title="test_large_input")

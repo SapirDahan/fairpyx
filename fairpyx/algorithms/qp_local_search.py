@@ -632,7 +632,7 @@ def qp_local_search(alloc: AllocationBuilder, T: float, epsilon: float = 0.1) ->
     return True
 
 
-def qp_max_min_allocation(instance: Instance, epsilon: float = 0.1) -> Dict[Any, Set]:
+def qp_max_min_allocation(alloc: AllocationBuilder, epsilon: float = 0.1):
     """
     Find the maximum T such that all agents can achieve value >= T/(4+epsilon).
 
@@ -644,18 +644,16 @@ def qp_max_min_allocation(instance: Instance, epsilon: float = 0.1) -> Dict[Any,
     The binary search converges when T_high - T_low < tolerance (1e-3).
 
     Args:
-        instance: Instance with agents, items, and valuations.
-                  In the restricted model, each item j has a fixed size p_j
-                  and each agent either values it at p_j or 0.
+        alloc: an AllocationBuilder, which tracks the allocation and the remaining
+               capacity for items and agents.
         epsilon: Approximation parameter (default 0.1 for 1/4.1-approximation).
                  Smaller values give tighter guarantees but slower runtime.
 
-    Returns:
-        Allocation dict mapping each agent to a set of assigned items.
-        Every agent's bundle value is >= best_T / (4 + epsilon).
+    >>> from fairpyx.adaptors import divide
+    >>> from fairpyx.utils.test_utils import stringify
 
     >>> instance = Instance(valuations={"Alice": {"x": 10, "y": 20, "z": 15}, "Bob": {"x": 10, "y": 20, "z": 15}})
-    >>> result = qp_max_min_allocation(instance, epsilon=0.1)
+    >>> result = divide(qp_max_min_allocation, instance=instance, epsilon=0.1)
     >>> set(result.keys()) == {"Alice", "Bob"}
     True
     >>> all(len(bundle) > 0 for bundle in result.values())
@@ -663,14 +661,15 @@ def qp_max_min_allocation(instance: Instance, epsilon: float = 0.1) -> Dict[Any,
 
     Each agent's value should meet the approximation guarantee:
     >>> alpha = 4.1
-    >>> all(sum(instance.agent_item_value(a, i) for i in b) >= alpha for a, b in result.items()) # 
+    >>> all(sum(instance.agent_item_value(a, i) for i in b) >= alpha for a, b in result.items()) #
     True
 
     Zero-value instance returns empty bundles:
     >>> instance0 = Instance(valuations={"Alice": {"x": 0}, "Bob": {"x": 0}})
-    >>> qp_max_min_allocation(instance0)
+    >>> divide(qp_max_min_allocation, instance=instance0)
     {'Alice': [], 'Bob': []}
     """
+    instance = alloc.instance
     logger.info(f"\n{'='*60}")
     logger.info(f"QUASI-POLYNOMIAL MAX-MIN ALLOCATION")
     logger.info(f"Agents: {list(instance.agents)}, Items: {list(instance.items)}")
@@ -685,7 +684,7 @@ def qp_max_min_allocation(instance: Instance, epsilon: float = 0.1) -> Dict[Any,
 
     if max_total_value == 0:
         logger.warning("All items have zero value for all agents")
-        return {agent: [] for agent in instance.agents}
+        return
 
     T_low = 0.0
 
@@ -707,12 +706,12 @@ def qp_max_min_allocation(instance: Instance, epsilon: float = 0.1) -> Dict[Any,
 
         # Start with a fresh (empty) matching for each T — edge classifications (fat/thin)
         # depend on T, so reusing a matching from a different T leads to incorrect classifications.
-        alloc = AllocationBuilder(instance)
-        success = qp_local_search(alloc, T_mid, epsilon)
+        search_alloc = AllocationBuilder(instance)
+        success = qp_local_search(search_alloc, T_mid, epsilon)
 
         if success:
             best_T = T_mid
-            best_allocation = alloc.sorted()
+            best_allocation = search_alloc.sorted()
             T_low = T_mid
             logger.info(f"[Binary Search] T={T_mid:.4f} is FEASIBLE -> search higher (T_low <- {T_mid:.4f})")
         else:
@@ -727,7 +726,7 @@ def qp_max_min_allocation(instance: Instance, epsilon: float = 0.1) -> Dict[Any,
 
     if best_T == 0.0:
         logger.warning("No feasible allocation found")
-        return {agent: [] for agent in instance.agents}
+        return
 
     # Post-processing: assign remaining unallocated items greedily.
     # The core algorithm only allocates enough items to meet the threshold,
@@ -755,16 +754,21 @@ def qp_max_min_allocation(instance: Instance, epsilon: float = 0.1) -> Dict[Any,
             bundle_values[best_agent] += instance.agent_item_value(best_agent, item)
             logger.info(f"  Assigned {item} to {best_agent} (bundle_value now={bundle_values[best_agent]:.4f})")
 
+    # Apply the final allocation to the AllocationBuilder
+    for agent, bundle in best_allocation.items():
+        for item in bundle:
+            alloc.give(agent, item)
+
     logger.info(f"\nFinal allocation:")
     threshold = best_T / (4 + epsilon)
     for agent, bundle in best_allocation.items():
         value = sum(instance.agent_item_value(agent, item) for item in bundle)
         logger.info(f"  {agent}: items={bundle}, value={value:.4f} (threshold={threshold:.4f})")
 
-    return best_allocation
-
 
 if __name__ == "__main__":
+    from fairpyx.adaptors import divide
+
     logger.addHandler(logging.StreamHandler())
     logger.setLevel(logging.INFO)
 
@@ -774,5 +778,5 @@ if __name__ == "__main__":
             "Bob":   {"item1": 10, "item2": 0, "item3": 30},
         }
     )
-    allocation = qp_max_min_allocation(instance)
+    allocation = divide(qp_max_min_allocation, instance=instance)
     print(allocation)
