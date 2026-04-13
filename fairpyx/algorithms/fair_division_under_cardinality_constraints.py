@@ -375,16 +375,17 @@ def greedy_round_robin(
     alloc: AllocationBuilder,
     items_in_category: list,
     agent_order: list,
-    category_capacities: dict,
-    category: str,
 ) -> None:
     """
     Allocate all goods from a single category using Greedy Round-Robin (Algorithm 2).
 
     Agents pick in round-robin order, cycling repeatedly. On each turn an agent greedily
-    selects the remaining good in the category it values most, subject to its per-category
-    capacity k_h. An agent is skipped once it has received k_h goods from this category.
-    The procedure terminates when all goods are allocated or all agents have reached capacity.
+    selects the remaining good in the category it values most. The procedure terminates
+    when all goods are allocated.
+
+    No explicit capacity parameter is needed: validate_fair_division_inputs guarantees
+    k_h >= ceil(|C_h| / n) before this function is called, so the natural round-robin
+    cycling already ensures no agent receives more than k_h goods.
 
     :param alloc: an allocation builder, which tracks the allocation and the remaining
         capacity for items and agents.
@@ -392,40 +393,47 @@ def greedy_round_robin(
         in this round.
     :param agent_order: the ordered list of agents specifying the picking sequence for this
         category (either initial_agent_order or the topological sort from the previous category).
-    :param category_capacities: a dictionary mapping each category name (str) to the shared
-        integer threshold k_h for that category.
-    :param category: the name (str) of the category currently being allocated.
 
-    >>> # Example 1: 2 agents, 2 goods, k_h=1 — each agent picks their top good
+    >>> # Example 1: 2 agents, 2 goods — each agent picks their top good
     >>> from fairpyx import Instance, AllocationBuilder
     >>> valuations = {'Alice': {'m1': 9, 'm2': 3}, 'Bob': {'m1': 3, 'm2': 8}}
     >>> instance = Instance(valuations=valuations)
     >>> alloc = AllocationBuilder(instance)
-    >>> category_capacities = {'c1': 1}
-    >>> greedy_round_robin(alloc, ['m1', 'm2'], ['Alice', 'Bob'], category_capacities, 'c1')
+    >>> greedy_round_robin(alloc, ['m1', 'm2'], ['Alice', 'Bob'])
     >>> alloc.sorted()
     {'Alice': ['m1'], 'Bob': ['m2']}
 
-    >>> # Example 2: 3 agents, 3 goods, k_h=1 — each picks their unique top good in order
+    >>> # Example 2: 3 agents, 3 goods — each picks their unique top good in order
     >>> valuations = {'A': {'m1': 9, 'm2': 5, 'm3': 1},
     ...               'B': {'m1': 3, 'm2': 9, 'm3': 2},
     ...               'C': {'m1': 2, 'm2': 4, 'm3': 8}}
-    >>> category_capacities = {'c1': 1}
     >>> instance = Instance(valuations=valuations)
     >>> alloc = AllocationBuilder(instance)
-    >>> greedy_round_robin(alloc, ['m1', 'm2', 'm3'], ['A', 'B', 'C'], category_capacities, 'c1')
+    >>> greedy_round_robin(alloc, ['m1', 'm2', 'm3'], ['A', 'B', 'C'])
     >>> alloc.sorted()
     {'A': ['m1'], 'B': ['m2'], 'C': ['m3']}
 
-    >>> # Example 3: 2 agents, 4 goods, k_h=2 — each agent picks 2 goods
+    >>> # Example 3: 2 agents, 4 goods — 2 rounds, each agent picks 2 goods
     >>> valuations = {'Alice': {'m1': 10, 'm2': 8, 'm3': 5, 'm4': 3},
     ...               'Bob':   {'m1': 3,  'm2': 5, 'm3': 8, 'm4': 10}}
-    >>> category_capacities = {'c1': 2}
     >>> instance = Instance(valuations=valuations)
     >>> alloc = AllocationBuilder(instance)
-    >>> greedy_round_robin(alloc, ['m1', 'm2', 'm3', 'm4'], ['Alice', 'Bob'], category_capacities, 'c1')
+    >>> greedy_round_robin(alloc, ['m1', 'm2', 'm3', 'm4'], ['Alice', 'Bob'])
     >>> alloc.sorted()
     {'Alice': ['m1', 'm2'], 'Bob': ['m3', 'm4']}
+
+    >>> # Example 4: competition — both agents want g1 most, but A picks first and takes it
+    >>> # Round 1: A takes g1 (value 10, best for A). B wants g1 too (value 9) but it is gone;
+    >>> #          B takes g2 instead (value 8, best remaining).
+    >>> # Round 2: A takes g3 (only remaining, value 1).
+    >>> # Result: A=[g1,g3], B=[g2]. B had to settle for its second choice.
+    >>> valuations = {'A': {'g1': 10, 'g2': 3, 'g3': 1},
+    ...               'B': {'g1': 9,  'g2': 8, 'g3': 2}}
+    >>> instance = Instance(valuations=valuations)
+    >>> alloc = AllocationBuilder(instance)
+    >>> greedy_round_robin(alloc, ['g1', 'g2', 'g3'], ['A', 'B'])
+    >>> alloc.sorted()
+    {'A': ['g1', 'g3'], 'B': ['g2']}
     """
 
     pass
