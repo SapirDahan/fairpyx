@@ -367,7 +367,6 @@ def fair_division_under_cardinality_constraints(
     # goods) are covered in full by the doctests of validate_fair_division_inputs.
     """
 
-
     pass
 
 
@@ -656,10 +655,9 @@ def validate_fair_division_inputs(
         ...
     ValueError: ...
 
-    >>> # [check 5] invalid — instance has empty valuations (no agents, no items), order is None raises ValueError
-    >>> empty_instance = Instance(valuations={})
-    >>> empty_alloc = AllocationBuilder(empty_instance)
-    >>> validate_fair_division_inputs(empty_alloc, item_categories, category_capacities, None)
+    >>> # [check 5] invalid — initial_agent_order is an empty list raises ValueError
+    >>> # (empty valuations are rejected by the fairpyx framework before reaching this function)
+    >>> validate_fair_division_inputs(alloc, item_categories, category_capacities, [])
     Traceback (most recent call last):
         ...
     ValueError: ...
@@ -838,7 +836,6 @@ def validate_fair_division_inputs(
     """
 
     pass
-
 
 if __name__ == "__main__":
     import doctest
