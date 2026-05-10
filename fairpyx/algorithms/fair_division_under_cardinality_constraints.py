@@ -2,7 +2,7 @@
 An implementation of the algorithm in:
 "Fair Division Under Cardinality Constraints", by A. Biswas, S. Barman (2018), https://arxiv.org/abs/1804.09521
 Programmer: Sapir Dahan
-Date : 2026-04
+Date : 2026-05
 """
 
 import math
@@ -367,7 +367,82 @@ def fair_division_under_cardinality_constraints(
     # goods) are covered in full by the doctests of validate_fair_division_inputs.
     """
 
-    pass
+    # Reject bad inputs early so the rest of the function can assume they are correct
+    validate_fair_division_inputs(alloc, item_categories, category_capacities, initial_agent_order)
+
+    # Collect all agent names from the instance
+    agents = list(alloc.instance.agents)
+
+    # Use the caller-supplied order, or fall back to alphabetical — "fix an ordering of the agents σ"
+    agent_order = initial_agent_order if initial_agent_order is not None else sorted(agents)
+
+    # Count total items so the log gives a useful overview before the loop starts
+    total_items = sum(len(v) for v in item_categories.values())
+    logger.info(
+        "Starting: %d agents, %d items total across %d categories %s",
+        len(agent_order), total_items, len(item_categories),
+        {cat: len(itms) for cat, itms in item_categories.items()},
+    )
+
+    # Convert to a list so we can check whether we are on the last category
+    categories = list(item_categories.items())
+
+    # "for h = 1 to ℓ"
+    for idx, (category, items) in enumerate(categories):
+
+        # Log the category header so each iteration is easy to spot in the output
+        logger.info(
+            "--- Category %s (%d goods) | picking order: %s ---",
+            category, len(items), agent_order,
+        )
+
+        # Log each agent's personal ranking of the goods in this category (most to least valued)
+        for agent in agent_order:
+            ranked = sorted(items, key=lambda g: alloc.instance.agent_item_value(agent, g), reverse=True)
+            logger.debug(
+                "  %s's preferences: %s",
+                agent,
+                [(g, int(alloc.instance.agent_item_value(agent, g))) for g in ranked],
+            )
+
+        # Distribute this category's goods using greedy round-robin — "B^h ← Greedy-Round-Robin(C_h, [n], (v_i)_i, σ)"
+        greedy_round_robin(alloc, items, agent_order)
+
+        # Remove any envy cycles from the current allocation by rotating bundles — "update A^h to obtain an acyclic envy graph G(A^h)"
+        G = eliminate_envy_cycles(alloc)
+
+        # Derive the picking order for the next category from the acyclic envy graph — "update σ to be a topological ordering of G(A^h)"
+        agent_order = list(nz.topological_sort(G))
+
+        # Only show the new order when there is a next category that will actually use it
+        if idx < len(categories) - 1:
+            logger.info("Picking order for next category: %s", agent_order)
+
+            # Explain each agent's position: agents nobody envies pick first (their bundle is
+            # the least desirable, so they get priority to compensate); agents many others envy
+            # pick last (they already hold the most valuable goods)
+            for rank, agent in enumerate(agent_order, 1):
+
+                # Find all agents who envy this agent (i.e. who have a directed edge pointing at them)
+                enviers = [i for i in G.nodes() if G.has_edge(i, agent)]
+
+                if enviers:
+                    # This agent's bundle is considered valuable by others, so they pick later as a penalty
+                    logger.info(
+                        "  pick %d: %s — envied by %s (their bundle is desirable → picks later)",
+                        rank, agent, enviers,
+                    )
+
+                else:
+                    # Nobody envies this agent's bundle, so they get an earlier pick as compensation.
+                    # Note: multiple agents can have no enviers — rank shows their exact position among them
+                    logger.info(
+                        "  pick %d: %s — nobody envies their bundle → gets an earlier pick (priority)",
+                        rank, agent,
+                    )
+
+    # Log the completed allocation once all categories have been processed
+    logger.info("Final allocation: %s", {a: sorted(alloc.bundles[a]) for a in alloc.instance.agents})
 
 
 def greedy_round_robin(
@@ -435,7 +510,33 @@ def greedy_round_robin(
     {'A': ['g1', 'g3'], 'B': ['g2']}
     """
 
-    pass
+    # M is the pool of items still waiting to be distributed in this category — "initialise M ← C"
+    # Using a local copy so the caller's list is never modified
+    M = list(items_in_category)
+
+    # Keep going until every item in this category has been assigned — "while M ≠ ∅"
+    while M:
+
+        # One full pass through all agents in their current picking order — "for i = 1 to n"
+        for agent in agent_order:
+
+            # All items in this category have been distributed — stop the round-robin even if
+            # some agents in the current pass have not picked yet
+            if not M:
+                break
+
+            # Each agent greedily picks the item they value most among what is still available — "argmax_{g ∈ M} v_{σ(i)}(g)"
+            best_item = max(M, key=lambda g: alloc.instance.agent_item_value(agent, g))
+
+            # Log which item was chosen and its value so picks are traceable
+            logger.debug(
+                "  Agent %s picks %s (value %g)",
+                agent, best_item, alloc.instance.agent_item_value(agent, best_item),
+            )
+
+            # Record the pick in the allocation and remove the item from the available pool — "B_{σ(i)} ← B_{σ(i)} ∪ {g}; M ← M \ {g}"
+            alloc.give(agent, best_item)
+            M.remove(best_item)
 
 
 def eliminate_envy_cycles(alloc: AllocationBuilder) -> nz.DiGraph:
@@ -515,7 +616,84 @@ def eliminate_envy_cycles(alloc: AllocationBuilder) -> nz.DiGraph:
     ['m1']
     """
 
-    return nz.DiGraph()  # placeholder so callers see a DiGraph, not None
+    # Collect all agent names once, the list stays fixed even as bundles are rotated below
+    agents = list(alloc.instance.agents)
+
+    # Repeat until the envy graph has no more cycles — "update A^h to obtain an acyclic envy graph G(A^h)"
+    # Each iteration either eliminates one cycle (and restarts) or confirms the graph is a DAG (and exits)
+    while True:
+
+        # Build a fresh directed graph from scratch — bundles may have changed in the previous iteration
+        G = nz.DiGraph()
+
+        # Every agent must be a node even if nobody envies them, so topological sort sees all agents later
+        G.add_nodes_from(agents)
+
+        # Check every ordered pair (i, j) to decide whether agent i envies agent j
+        for i in agents:
+
+            # How much agent i values their own current bundle (sum of item values)
+            val_i_own = alloc.instance.agent_bundle_value(i, alloc.bundles[i])
+
+            for j in agents:
+
+                # An agent cannot envy themselves, so skip the same-agent pair
+                if i == j:
+                    continue
+
+                # How much agent i would value j's bundle if they had it instead
+                val_i_other = alloc.instance.agent_bundle_value(i, alloc.bundles[j])
+
+                if val_i_other > val_i_own:
+
+                    # i strictly prefer j's bundle — this is the definition of envy, so add edge i → j
+                    G.add_edge(i, j)
+                    logger.debug(
+                        "  %s envies %s  (%s values own bundle=%g < %s's bundle=%g)",
+                        i, j, i, val_i_own, j, val_i_other,
+                    )
+
+        # Build a readable summary of who envies whom and log it at INFO level
+        if G.edges():
+            envy_desc = ",  ".join(f"{i} envies {j}" for i, j in G.edges())
+            logger.info("Envy: %s", envy_desc)
+
+        else:
+            # No edges means no agent envies any other — allocation is already envy-free
+            logger.info("No envy — all agents prefer their own bundle")
+
+        # Try to find one directed cycle in the envy graph; we only need one per iteration
+        # nz.simple_cycles returns a generator — next() takes the first cycle or None if none exist
+        cycle = next(nz.simple_cycles(G), None)
+
+        if cycle is None:
+
+            # No cycle found — the graph is a DAG, so we are done
+            logger.info("Envy graph is a DAG — no cycles, moving on")
+            break
+
+        # Format the cycle as "a → b → c → a" to make the direction clear in the log
+        cycle_str = " -> ".join(cycle) + " -> " + cycle[0]
+        logger.info("Cycle detected: %s  — rotating bundles along cycle", cycle_str)
+
+        # Snapshot every bundle in the cycle BEFORE any assignment, because we are about to
+        # overwrite alloc.bundles entries and would otherwise lose the original values mid-rotation
+        saved = {agent: alloc.bundles[agent] for agent in cycle}
+
+        # Rotate: each agent at position idx receives the bundle of the agent at position idx+1
+        # The modulo wraps the last agent back to position 0, giving the last agent the first agent's bundle
+        # a_1 ← a_2's bundle, a_2 ← a_3's bundle, ..., a_r ← a_1's bundle
+        for idx in range(len(cycle)):
+            alloc.bundles[cycle[idx]] = saved[cycle[(idx + 1) % len(cycle)]]
+
+        # Log the full allocation after the rotation so the effect on every agent is visible
+        logger.info(
+            "After rotation: %s",
+            {a: sorted(alloc.bundles[a]) for a in alloc.bundles},
+        )
+
+    # Return the final acyclic envy graph so the caller can run topological sort to get the next picking order
+    return G
 
 
 
@@ -835,8 +1013,165 @@ def validate_fair_division_inputs(
     >>> validate_fair_division_inputs(alloc_3, {'c1': ['m1', 'm2', 'm3']}, {'c1': 2}, ['Alice', 'Bob'])
     """
 
-    pass
+    logger.debug("Validating inputs: %d agents, %d categories", len(list(alloc.instance.agents)), len(item_categories) if isinstance(item_categories, dict) else "?")
+
+    # Check 1: initial_agent_order must be None or a list
+    if initial_agent_order is not None and not isinstance(initial_agent_order, list):
+        logger.warning("Check 1 failed: initial_agent_order is %s, expected None or list", type(initial_agent_order).__name__)
+        raise ValueError(
+            f"initial_agent_order must be None or a list, got {type(initial_agent_order).__name__}"
+        )
+
+    # Check 2: item_categories must be a dict
+    if not isinstance(item_categories, dict):
+        logger.warning("Check 2 failed: item_categories is %s, expected dict", type(item_categories).__name__)
+        raise ValueError(
+            f"item_categories must be a dict, got {type(item_categories).__name__}"
+        )
+
+    # Check 3: category_capacities must be a dict
+    if not isinstance(category_capacities, dict):
+        logger.warning("Check 3 failed: category_capacities is %s, expected dict", type(category_capacities).__name__)
+        raise ValueError(
+            f"category_capacities must be a dict, got {type(category_capacities).__name__}"
+        )
+
+    # Check 4: every value in item_categories must be a list
+    for cat, cat_items in item_categories.items():
+        if not isinstance(cat_items, list):
+            logger.warning("Check 4 failed: item_categories[%r] is %s, expected list", cat, type(cat_items).__name__)
+            raise ValueError(
+                f"item_categories[{cat!r}] must be a list, got {type(cat_items).__name__}"
+            )
+
+    # Check 5: at least one agent (fires when initial_agent_order=[] is passed)
+    agents_to_use = initial_agent_order if initial_agent_order is not None else list(alloc.instance.agents)
+    if len(agents_to_use) == 0:
+        logger.warning("Check 5 failed: no agents provided")
+        raise ValueError("At least one agent must exist in the instance")
+
+    # Check 6: at least one category
+    if len(item_categories) == 0:
+        logger.warning("Check 6 failed: item_categories is empty")
+        raise ValueError("item_categories must contain at least one category")
+
+    # Check 7: no empty category lists
+    for cat, cat_items in item_categories.items():
+        if len(cat_items) == 0:
+            logger.warning("Check 7 failed: category %r has an empty item list", cat)
+            raise ValueError(f"Category {cat!r} has an empty item list")
+
+    # Check 8: if provided, initial_agent_order must be an exact permutation of the agents
+    if initial_agent_order is not None:
+        instance_agents = set(alloc.instance.agents)
+        order_set = set(initial_agent_order)
+        if len(initial_agent_order) != len(order_set) or order_set != instance_agents:
+            logger.warning("Check 8 failed: initial_agent_order %s is not a permutation of agents %s", initial_agent_order, sorted(instance_agents))
+            raise ValueError(
+                f"initial_agent_order must be a permutation of the agents. "
+                f"Got {initial_agent_order}, expected {sorted(instance_agents)}"
+            )
+
+    # Check 9: category_capacities keys must match item_categories keys exactly
+    if set(category_capacities.keys()) != set(item_categories.keys()):
+        logger.warning("Check 9 failed: category_capacities keys %s != item_categories keys %s", set(category_capacities.keys()), set(item_categories.keys()))
+        raise ValueError(
+            f"category_capacities keys {set(category_capacities.keys())} must match "
+            f"item_categories keys {set(item_categories.keys())}"
+        )
+
+    # Check 10: every item listed in item_categories must exist in the instance
+    instance_items = set(alloc.instance.items)
+    for cat, cat_items in item_categories.items():
+        for item in cat_items:
+            if item not in instance_items:
+                logger.warning("Check 10 failed: item %r in category %r does not exist in the instance", item, cat)
+                raise ValueError(
+                    f"Item {item!r} in category {cat!r} does not exist in the instance"
+                )
+
+    # Check 11: every item in the instance must appear in at least one category
+    all_categorised = set(item for cat_items in item_categories.values() for item in cat_items)
+    for item in alloc.instance.items:
+        if item not in all_categorised:
+            logger.warning("Check 11 failed: item %r is in the instance but not in any category", item)
+            raise ValueError(
+                f"Item {item!r} exists in the instance but is not listed in any category"
+            )
+
+    # Check 12: no item may appear in more than one category
+    seen_items: set = set()
+    for cat, cat_items in item_categories.items():
+        for item in cat_items:
+            if item in seen_items:
+                logger.warning("Check 12 failed: item %r appears in more than one category", item)
+                raise ValueError(f"Item {item!r} appears in more than one category")
+            seen_items.add(item)
+
+    # Check 13: all valuation values must be non-negative
+    for agent in alloc.instance.agents:
+        for item in alloc.instance.items:
+            if alloc.instance.agent_item_value(agent, item) < 0:
+                logger.warning("Check 13 failed: agent %r has negative valuation for item %r", agent, item)
+                raise ValueError(
+                    f"Valuation of agent {agent!r} for item {item!r} is negative"
+                )
+
+    # Check 14: all k_h must be positive integers (bool is excluded: isinstance(True, int) is True)
+    for cat, k_h in category_capacities.items():
+        if isinstance(k_h, bool) or not isinstance(k_h, int) or k_h <= 0:
+            logger.warning("Check 14 failed: category_capacities[%r] = %r is not a positive integer", cat, k_h)
+            raise ValueError(
+                f"category_capacities[{cat!r}] = {k_h!r} must be a positive integer"
+            )
+
+    # Check 15: k_h >= ceil(|C_h| / n) — feasibility condition from the paper
+    n = len(list(alloc.instance.agents))
+    for cat, cat_items in item_categories.items():
+        k_h = category_capacities[cat]
+        min_required = math.ceil(len(cat_items) / n)
+        if k_h < min_required:
+            logger.warning("Check 15 failed: category %r has k_h=%d < ceil(%d/%d)=%d — feasibility violated", cat, k_h, len(cat_items), n, min_required)
+            raise ValueError(
+                f"category_capacities[{cat!r}] = {k_h} < ceil({len(cat_items)}/{n}) = {min_required}. "
+                f"The feasibility condition k_h >= ceil(|C_h|/n) is violated."
+            )
+
+    logger.debug("All 15 validation checks passed")
 
 if __name__ == "__main__":
-    import doctest
-    print(doctest.testmod())
+    # Demo: run the algorithm on Example 10 (3 agents, 6 goods, 2 categories, k_h=1).
+    # This example produces two overlapping envy cycles after C2, showing the full cycle-elimination logic.
+    import logging
+    from fairpyx import divide
+
+    logging.basicConfig(
+        level=logging.DEBUG,   # change to INFO to hide per-pick detail
+        format="%(levelname)-5s  %(name)s: %(message)s",
+    )
+
+    valuations = {
+        'a1': {'g1': 9, 'g2': 2, 'g3': 1, 'g4': 1, 'g5': 10, 'g6': 0},
+        'a2': {'g1': 10, 'g2': 8, 'g3': 1, 'g4': 10, 'g5': 1, 'g6': 0},
+        'a3': {'g1': 10, 'g2': 9, 'g3': 5, 'g4': 8, 'g5': 1, 'g6': 7},
+    }
+    item_categories = {'C1': ['g1', 'g2', 'g3'], 'C2': ['g4', 'g5', 'g6']}
+    category_capacities = {'C1': 1, 'C2': 1}
+
+    instance = Instance(valuations=valuations)
+    result = divide(
+        algorithm=fair_division_under_cardinality_constraints,
+        instance=instance,
+        item_categories=item_categories,
+        category_capacities=category_capacities,
+        initial_agent_order=['a1', 'a2', 'a3'],
+    )
+
+    # Validation failure demo: k_h=0 violates check 14 — a WARNING is logged before the ValueError
+    print("\n--- Validation failure demo ---")
+    from fairpyx import AllocationBuilder
+    bad_alloc = AllocationBuilder(instance)
+    try:
+        validate_fair_division_inputs(bad_alloc, item_categories, {'C1': 0, 'C2': 1}, ['a1', 'a2', 'a3'])
+    except ValueError as e:
+        print("Caught ValueError:", e)
